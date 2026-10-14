@@ -1,0 +1,504 @@
+// Vibe Discord Bot - Prisma schema
+// PostgreSQL is required (uses scalar lists + Json columns).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Core agent / task pipeline
+// ---------------------------------------------------------------------------
+
+model GuildConfig {
+  guildId                String   @id
+  // Role configuration
+  adminRoles             String[] @default([])
+  moderatorRoles         String[] @default([])
+  trustedStaffRoles      String[] @default([])
+  protectedRoles         String[] @default([])
+  protectedChannels      String[] @default([])
+  protectedCategories    String[] @default([])
+  // Behavior
+  enableConversational   Boolean  @default(false)
+  conversationalChannels String[] @default([])
+  enableAutomod          Boolean  @default(false)
+  enableTickets          Boolean  @default(false)
+  enableApplications     Boolean  @default(false)
+  // Ticket / application channel routing
+  ticketCategoryId       String?
+  ticketArchiveChannelId String?
+  logChannelId           String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+}
+
+model Task {
+  id              String    @id @default(cuid())
+  guildId         String
+  channelId       String
+  userId          String
+  messageId       String?
+  threadId        String?
+  status          String    @default("RECEIVED")
+  currentStep     Int       @default(0)
+  maxSteps        Int       @default(50)
+  maxModelCalls   Int       @default(20)
+  modelCallsUsed  Int       @default(0)
+  rawInput        String
+  sanitizedInput  String
+  contextSnapshot Json?
+  plan            Json?
+  planVersion     Int       @default(0)
+  requiresApproval Boolean  @default(false)
+  approvalId      String?
+  approvalExpires DateTime?
+  approvedBy      String?
+  approvedAt      DateTime?
+  error           String?
+  errorStep       Int?
+  retryCount      Int       @default(0)
+  maxRetries      Int       @default(2)
+  startedAt       DateTime?
+  completedAt     DateTime?
+  deadline        DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  steps      TaskStep[]
+  operations Operation[]
+
+  @@index([guildId])
+  @@index([userId])
+  @@index([status])
+  @@index([messageId])
+}
+
+model TaskStep {
+  id                 String    @id @default(cuid())
+  taskId             String
+  stepIndex          Int
+  type               String
+  toolName           String?
+  toolArgs           Json?
+  description        String
+  expectedOutput     String?
+  riskLevel          String    @default("LOW")
+  readOnly           Boolean   @default(true)
+  dependsOn          Int[]     @default([])
+  status             String    @default("PENDING")
+  result             Json?
+  error              String?
+  startedAt          DateTime?
+  completedAt        DateTime?
+  durationMs         Int?
+  retryCount         Int       @default(0)
+  verified           Boolean   @default(false)
+  verificationResult Json?
+  verifiedAt         DateTime?
+
+  task       Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  operations Operation[]
+
+  @@unique([taskId, stepIndex])
+  @@index([taskId])
+}
+
+model Operation {
+  id                     String    @id @default(cuid())
+  guildId                String
+  taskId                 String?
+  stepId                 String?
+  userId                 String
+  type                   String
+  toolName               String
+  toolArgs               Json?
+  targetType             String?
+  targetId               String?
+  authorized             Boolean   @default(false)
+  authorizedBy           String?
+  authorizationId        String?
+  riskLevel              String    @default("LOW")
+  requiresConfirmation   Boolean   @default(false)
+  confirmationId         String?
+  confirmedBy            String?
+  confirmedAt            DateTime?
+  confirmationExpires    DateTime?
+  status                 String    @default("PLANNED")
+  idempotencyKey         String?   @unique
+  discordResponse        Json?
+  result                 Json?
+  error                  String?
+  errorClass             String?
+  retryable              Boolean   @default(false)
+  verified               Boolean   @default(false)
+  verificationResult     Json?
+  verifiedAt             DateTime?
+  verificationError      String?
+  startedAt              DateTime?
+  completedAt            DateTime?
+  durationMs             Int?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  task Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  step TaskStep? @relation(fields: [stepId], references: [id], onDelete: SetNull)
+
+  @@index([guildId])
+  @@index([taskId])
+  @@index([status])
+}
+
+model ConversationContext {
+  id            String   @id @default(cuid())
+  guildId       String
+  channelId     String
+  userId        String
+  messages      Json     @default("[]")
+  lastMessageAt DateTime @default(now())
+  messageCount  Int      @default(0)
+  summary       String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([guildId, channelId, userId])
+  @@index([guildId])
+  @@index([lastMessageAt])
+}
+
+model RateLimitBucket {
+  id          String   @id @default(cuid())
+  scope       String
+  identifier  String
+  windowStart DateTime
+  windowEnd   DateTime
+  count       Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@unique([scope, identifier, windowStart])
+  @@index([windowStart])
+}
+
+model Approval {
+  id            String    @id @default(cuid())
+  guildId       String
+  userId        String
+  planId        String
+  planHash      String
+  toolName      String
+  toolArgs      Json?
+  riskLevel     String
+  description   String
+  expiresAt     DateTime
+  status        String    @default("PENDING")
+  approvedBy    String?
+  approvedAt    DateTime?
+  deniedBy      String?
+  deniedAt      DateTime?
+  denialReason  String?
+  createdAt     DateTime  @default(now())
+
+  @@index([guildId, status])
+}
+
+model AuditEvent {
+  id          String   @id @default(cuid())
+  guildId     String
+  taskId      String?
+  operationId String?
+  userId      String
+  eventType   String
+  toolName    String?
+  riskLevel   String   @default("NONE")
+  success     Boolean  @default(true)
+  details     Json?
+  createdAt   DateTime @default(now())
+
+  @@index([guildId])
+  @@index([eventType])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Tickets
+// ---------------------------------------------------------------------------
+
+model Ticket {
+  id           String    @id @default(cuid())
+  guildId      String
+  number       Int
+  type         String    @default("SUPPORT")
+  status       String    @default("OPEN")
+  priority     String    @default("MEDIUM")
+  subject      String
+  description  String
+  creatorId    String
+  creatorName  String
+  assigneeId   String?
+  assigneeName String?
+  channelId    String
+  threadId     String?
+  tags         String[]  @default([])
+  openedAt     DateTime  @default(now())
+  claimedAt    DateTime?
+  closedAt     DateTime?
+  closedBy     String?
+  closedReason String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  events       TicketEvent[]
+  participants TicketParticipant[]
+  notes        TicketNote[]
+  transcripts  Transcript[]
+
+  @@unique([guildId, number])
+  @@index([guildId, status])
+  @@index([creatorId])
+  @@index([assigneeId])
+}
+
+model TicketEvent {
+  id          String   @id @default(cuid())
+  ticketId    String
+  type        String
+  userId      String
+  userName    String
+  description String
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+}
+
+model TicketParticipant {
+  id       String   @id @default(cuid())
+  ticketId String
+  userId   String
+  addedBy  String
+  addedAt  DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@unique([ticketId, userId])
+  @@index([ticketId])
+}
+
+model TicketNote {
+  id        String   @id @default(cuid())
+  ticketId  String
+  authorId  String
+  note      String
+  internal  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+}
+
+model Transcript {
+  id        String   @id @default(cuid())
+  ticketId  String
+  format    String   @default("text")
+  content   String
+  url       String?
+  createdAt DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+}
+
+// ---------------------------------------------------------------------------
+// Applications
+// ---------------------------------------------------------------------------
+
+model ApplicationPanel {
+  id              String    @id @default(cuid())
+  guildId         String
+  type            String
+  title           String
+  description     String
+  questions       Json      @default("[]")
+  channelId       String
+  messageId       String
+  reviewRoles     String[]  @default([])
+  maxApplications Int?
+  expireAfterDays Int?
+  status          String    @default("ACTIVE")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  applications Application[]
+
+  @@index([guildId, status])
+}
+
+model Application {
+  id             String    @id @default(cuid())
+  guildId        String
+  number         Int
+  panelId        String
+  type           String
+  status         String    @default("PENDING")
+  applicantId    String
+  applicantName  String
+  answers        Json      @default("{}")
+  reviewerId     String?
+  reviewerName   String?
+  reviewNotes    String?
+  reviewScore    Int?
+  decidedBy      String?
+  decidedAt      DateTime?
+  decisionReason String?
+  submittedAt    DateTime  @default(now())
+  reviewedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  panel   ApplicationPanel    @relation(fields: [panelId], references: [id], onDelete: Cascade)
+  reviews ApplicationReview[]
+
+  @@unique([guildId, number])
+  @@index([guildId, status])
+  @@index([applicantId])
+  @@index([panelId])
+}
+
+model ApplicationReview {
+  id            String   @id @default(cuid())
+  applicationId String
+  reviewerId    String
+  reviewerName  String
+  score         Int?
+  notes         String?
+  decision      String?
+  createdAt     DateTime @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+}
+
+// ---------------------------------------------------------------------------
+// Staff
+// ---------------------------------------------------------------------------
+
+model StaffDuty {
+  id        String    @id @default(cuid())
+  guildId   String
+  userId    String
+  userName  String
+  role      String
+  status    String    @default("ACTIVE")
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+  reason    String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([guildId, userId])
+  @@index([guildId, status])
+}
+
+model StaffActivity {
+  id         String   @id @default(cuid())
+  guildId    String
+  userId     String
+  userName   String
+  role       String
+  actionType String
+  count      Int      @default(1)
+  period     String
+  recordedAt DateTime @default(now())
+
+  @@index([guildId, userId])
+  @@index([guildId, actionType])
+}
+
+model Report {
+  id               String   @id @default(cuid())
+  guildId          String
+  number           Int
+  reportedUserId   String
+  reportedUserName String
+  reportedById     String
+  reportedByName   String
+  reason           String
+  evidence         Json     @default("[]")
+  status           String   @default("OPEN")
+  assignedToId     String?
+  ticketId         String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([guildId, number])
+  @@index([guildId, status])
+}
+
+model Reminder {
+  id          String    @id @default(cuid())
+  guildId     String
+  userId      String
+  message     String
+  scheduledAt DateTime
+  recurring   Json?
+  status      String    @default("SCHEDULED")
+  sentAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([guildId])
+  @@index([status, scheduledAt])
+}
+
+// ---------------------------------------------------------------------------
+// Server design
+// ---------------------------------------------------------------------------
+
+model LayoutProposal {
+  id        String    @id @default(cuid())
+  guildId   String
+  createdBy String
+  proposal  Json
+  status    String    @default("PENDING")
+  createdAt DateTime  @default(now())
+  appliedAt DateTime?
+
+  @@index([guildId, status])
+}
+
+// ---------------------------------------------------------------------------
+// Moderation
+// ---------------------------------------------------------------------------
+
+model ModerationCase {
+  id             String    @id @default(cuid())
+  guildId        String
+  number         Int
+  type           String
+  status         String    @default("OPEN")
+  subjectId      String
+  subjectName    String
+  reason         String
+  evidence       Json      @default("[]")
+  notes          String?
+  assignedToId   String?
+  appealStatus   String?
+  appealReason   String?
+  appealDecision String?
+  openedAt       DateTime  @default(now())
+  closedAt       DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([guildId, number])
+  @@index([guildId, status])
+  @@index([subjectId])
+}
