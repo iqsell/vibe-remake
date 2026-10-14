@@ -2,6 +2,7 @@
   "name": "vibe",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "AI-operated Discord staff bot for server management, moderation and tickets",
   "type": "module",
   "main": "dist/app/bootstrap.js",

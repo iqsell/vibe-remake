@@ -2,8 +2,6 @@
 
 A Discord bot that runs a server for you. You talk to it, it does the boring stuff — makes channels, cleans them up, hands out roles, times people out, opens tickets, reads applications — and writes down what it did so you can go back and check.
 
-I built this because running a big-ish server by hand is death by a thousand clicks, and half the time you can't remember who deleted which channel. So the whole thing is built around one idea: an LLM picks the right tool, the code decides whether it's actually allowed to run it, and everything ends up in the database.
-
 ## What it does
 
 Mention it, reply to it, or drop a message in a channel you've marked as conversational, and it'll work out what you want and go do it. A few examples of the sort of thing it's meant to handle:
@@ -122,4 +120,4 @@ npm test
 
 ## License
 
-No license file yet — assume all rights reserved until I add one.
+MIT — see [LICENSE](LICENSE). Fork it, ship it, change it. A link back or a star is appreciated but not required.
